@@ -1,0 +1,30 @@
+# 环境与密钥
+.env
+.venv/
+venv/
+
+# 数据（不随仓库分发，只留 .gitkeep 与少量样例）
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.db
+*.sqlite3
+
+# 日志与缓存
+logs/*
+!logs/.gitkeep
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Excel/大文件
+*.xlsx
+!docs/投递清单.xlsx

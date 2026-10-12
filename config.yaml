@@ -1,0 +1,79 @@
+﻿# 采集与分析配置（敏感信息放 .env，不要写在这里）
+
+crawl:
+  # 关键词按「细分方向」分组：建议深耕 2–3 个方向，而不是 10 个词各抓一点
+  # （样本太散 → 每个方向的结论都不稳，这是学生项目最常见的分析错误）
+  keyword_groups:
+    考研升学: [考研数学, 考研英语, 考研规划, 考研政治]
+    编程与数据: [编程入门, 零基础学Python, 数据分析, SQL教程]
+    求职职场: [转行互联网, 求职面试, 简历修改, 计算机二级]
+    考证公考: [公务员考试, 教师资格证]
+
+  # 分区（**已实测**：知识区一级 rid=36；下列二级分区 tid 由
+  # reference/probe_endpoints.py --map-tids 从真实数据聚合得到，见 data/raw/tid_map.json）
+  zone_rid: 36                 # 知识区（一级分区，newlist/ranking 用这个）
+  sub_zone_tids:               # 二级分区 tid → 名称；按细分做供需分析时用
+    - {tid: 228, name: 人文历史}
+    - {tid: 201, name: 科学科普}
+    - {tid: 208, name: 校园学习}
+    - {tid: 124, name: 社科·法律·心理}
+    - {tid: 207, name: 财经商业}
+    - {tid: 122, name: 野生技能协会}
+    - {tid: 229, name: 设计·创意}
+    - {tid: 209, name: 职业职场}
+
+  max_videos: 5000          # 硬上限，别贪多；1500 条也能出统计结论
+
+  # ---- 文本数据源（2026-10-11 实测结论，别照抄教程里的"2万条评论"）----
+  # 评论：匿名状态下只能拿到 3 条预览，带游标翻页返回 -403（需登录 Cookie）
+  # 弹幕：/x/v1/dm/list.so 无需登录，单视频实测 360 条 → 作为文本分析主数据源
+  text_source: danmaku        # danmaku（主）| comment（辅：只取预览的高赞评论）
+  comments_per_video: 20      # 评论只作辅助证据（高赞观点），不是样本主力
+  max_comments: 6000          # 靠"视频数 × 预览条数"堆量，别指望单视频翻页
+  danmaku_per_video: 2000     # list.so 单视频约回 300–3000 条；要更多用 seg.so 分段（不必要）
+  max_danmaku: 200000
+
+  # 限速与重试（B站风控：太快会 -352）
+  request_interval_sec: 1.5
+  jitter_sec: 0.5
+  max_retry: 3
+  timeout_sec: 20
+
+  # ---- 采集策略（按 2026-10-11 实测的可靠性排序，说明见技术方案第十节）----
+  # 实测：搜索会被限流（静默 0 条）、newlist 不翻页；UP主投稿 + 相关推荐 最稳
+  strategy:
+    seed_by_ranking: true      # 第1步：8 个二级分区各取一轮 ranking 当种子
+    expand_by_up: true         # 第2步【主力】：按 UP 主拉投稿列表
+    up_pages: 3                # 每个 UP 主翻几页（ps=30 → 约 90 条/UP）
+    max_up: 250                # 最多处理多少个 UP 主
+    expand_by_related: true    # 第3步：相关推荐滚雪球
+    related_per_video: 40      # 实测单视频 40 条
+    use_search: false          # 第4步（可选）：搜索易限流，默认关；开启则间隔 >=10s
+    zone_filter: true          # 只保留知识区（tid 在 sub_zone_tids 白名单内）的视频
+  backoff_sec: [30, 60, 120]   # 遇限流时的退避阶梯：跳过而不是崩掉
+
+  # 断点续爬进度文件
+  progress_file: data/raw/_progress.json
+
+database:
+  # backend: mysql（简历/岗位要求，最终必须用它）| sqlite（兜底过渡：零依赖，装不上 MySQL 时先跑通）
+  backend: mysql
+  sqlite_path: data/bili.db
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  name: ${DB_NAME}
+  charset: utf8mb4
+
+analysis:
+  # 指标口径集中在这里，改口径只改一处（面试可讲的专业习惯）
+  boom_threshold_pct: 0.90   # 分区内 P90 以上算爆款
+  duration_bins: [0, 180, 480, 900, 1800, 99999]   # 秒：<3 / 3-8 / 8-15 / 15-30 / >30 分钟
+  hour_bins: [0, 6, 12, 18, 24]                    # 深夜/早/午/晚
+
+llm:
+  enabled: false             # 第15周再开
+  model: ${LLM_MODEL}
+  base_url: ${LLM_BASE_URL}
+  max_rows: 200              # 查询结果行数上限（安全）
