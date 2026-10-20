@@ -1,4 +1,4 @@
-"""采集 v0：知识区排行榜 -> data/raw/sample.json
+"S1""""采集 v0：知识区排行榜 -> data/raw/sample.json
 
 用法：
     $env:PYTHONUTF8=1
