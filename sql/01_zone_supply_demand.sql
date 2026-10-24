@@ -20,42 +20,72 @@
 --   4) coin/share 字段缺失，互动率只能用 (点赞+收藏)/播放。
 -- ============================================================
 
--- 语句1/2：分区维度对比（仅作抽样偏差的证据，不用于 Q1 结论）
 
-SELECT sub_zone, COUNT(*) AS 供给量
+-- ============================================================
+-- 【语句 1】数一数每个二级分区各有多少条视频
+-- 用途：这是"抽样偏差"的证据。跑完你会看到职业职场 173 条（定向捞的），
+--       而科学科普只有 23 条（排行榜顺手带的）——两者不可比。
+-- ============================================================
+SELECT
+    sub_zone,                    -- 分组维度：二级分区名(二级分区：即职场话题下的简历修改、职场沟通等)
+    COUNT(*) AS 供给量            -- 每组的行数 = 这个分区有几条视频
+FROM video                       -- 数据来自 video 表
+WHERE is_duration_outlier = 0    -- 只算正常视频，排除 >3 小时的直播回放/课程合集（异常值后面的标签为1）
+GROUP BY sub_zone                -- 按分区把行压成"一分区一行"
+ORDER BY 供给量 DESC;             -- 从多到少排，最多的在最上面
+
+
+-- ============================================================
+-- 【语句 2】"解剖查询"：看清 rn 和 cnt 长什么样
+-- 用途：不为了出结论，为了让你亲眼看到 rn 从 1 数到 cnt。
+--       中位数就藏在这个输出里（rn = (cnt+1)/2 那一行）。
+-- LIMIT 30 只是为了别刷屏。
+-- ============================================================
+SELECT
+    sub_zone,                                                                 -- 分区名
+    view_cnt,                                                                 -- 该视频播放量
+    ROW_NUMBER() OVER (PARTITION BY sub_zone ORDER BY view_cnt) AS rn,        -- 组内按播放量升序编号：1,2,3...
+    COUNT(*)     OVER (PARTITION BY sub_zone)                   AS cnt       -- 组内总条数（每行都重复这个数）
 FROM video
-WHERE is_duration_outlier = 0
-GROUP BY sub_zone
-ORDER BY 供给量 DESC;
+WHERE is_duration_outlier = 0                                                 -- 排除异常时长
+ORDER BY sub_zone, view_cnt                                                   -- 排一下，方便肉眼看每组
+LIMIT 30;                                                                     -- 只看前 30 行
 
-SELECT sub_zone,view_cnt,
-    ROW_NUMBER() OVER(PARTITION BY sub_zone ORDER BY view_cnt) AS rn,
-    COUNT(*)     OVER(PARTITION BY sub_zone)                   AS cnt
-FROM video
-WHERE is_duration_outlier = 0
-ORDER BY sub_zone,view_cnt
-LIMIT 30;
 
---语句3
-
+-- ============================================================
+-- 【语句 3】Q1 的正式分析：每个关键词的 中位数 / P90 / 集中度
+-- 三层结构（和 02、03 完全同一套配方）：
+--   第 1 层 r   ：明细+窗口，给每条视频贴上 rn 和 cnt
+--   第 2 层 最终：聚合，每个关键词一行
+-- 注意本文件只用了"一层 CTE + 一层聚合"，因为中位数和 P90 能在同一次 GROUP BY 里算完。
+-- ============================================================
 WITH r AS (
-  SELECT source_keyword, view_cnt,
-         ROW_NUMBER() OVER (PARTITION BY source_keyword ORDER BY view_cnt) AS rn,
-         COUNT(*)     OVER (PARTITION BY source_keyword)                   AS cnt
-  FROM video 
-  WHERE is_duration_outlier = 0
-  AND source_keyword LIKE 'kw:%' 
+    SELECT
+        source_keyword,                                                              -- 采集来源标记，如 'kw:简历修改'
+        view_cnt,                                                                    -- 播放量
+        ROW_NUMBER() OVER (PARTITION BY source_keyword ORDER BY view_cnt) AS rn,     -- 每个关键词内部按播放升序编号
+        COUNT(*)     OVER (PARTITION BY source_keyword)                   AS cnt     -- 每个关键词共几条
+    FROM video
+    WHERE is_duration_outlier = 0                                                    -- 排除异常时长
+      AND source_keyword LIKE 'kw:%'                                                 -- 只要关键词来源，排除 ranking_36 / related:xxx
 )
-SELECT source_keyword,
-       MAX(cnt) AS n,
-       ROUND(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
-                      THEN view_cnt END))                       AS 中位数,
-       ROUND(AVG(CASE WHEN rn = FLOOR(cnt*0.9)
-                      THEN view_cnt END))                       AS P90播放,
-       ROUND(AVG(CASE WHEN rn = FLOOR(cnt*0.9) THEN view_cnt END)
-             / NULLIF(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
-                               THEN view_cnt END), 0), 1)       AS 集中度
+SELECT
+    source_keyword,                                                                  -- 维度：哪个关键词
+    MAX(cnt) AS n,                                                                   -- 样本量（cnt 组内恒定，取 MAX 就是取那个值）
+
+    -- 中位数：只保留"正中间那 1~2 行"，其余行变 NULL，AVG 自动忽略 NULL
+    ROUND(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+                   THEN view_cnt END))                       AS 中位数,
+
+    -- P90：只保留"第 90% 位置那一行"
+    ROUND(AVG(CASE WHEN rn = FLOOR(cnt*0.9)
+                   THEN view_cnt END))                       AS P90播放,
+
+    -- 集中度 = P90 ÷ 中位数（NULLIF 防除以 0；ROUND 保留 1 位小数）
+    ROUND(AVG(CASE WHEN rn = FLOOR(cnt*0.9) THEN view_cnt END)
+          / NULLIF(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+                            THEN view_cnt END), 0), 1)       AS 集中度
 
 FROM r
-GROUP BY source_keyword
-ORDER BY 集中度 DESC;
+GROUP BY source_keyword                                                              -- 每个关键词一行
+ORDER BY 集中度 DESC;                                                                 -- 最集中的排最上面

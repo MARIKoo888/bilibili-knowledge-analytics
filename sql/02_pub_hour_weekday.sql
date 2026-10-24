@@ -12,26 +12,47 @@
 -- 已知局限：① 格子样本 4–36 条；② 采集偏向爆款；③ 视频跨 2022–2026 年，年份混淆未控制
 -- ============================================================
 
+
+-- 【第 1 层】base：明细表。一行 = 一条视频。
+-- 这一层只做一件事：把 pub_hour（0~23 的整数）翻译成"时段"这个中文列。
+-- ⚠️ 这一层不能出现 COUNT/SUM/AVG，否则报 only_full_group_by。
 WITH base AS (
-    SELECT pub_weekday,view_cnt,
-       CASE WHEN pub_hour < 6  THEN '深夜'
-            WHEN pub_hour < 12 THEN '上午'
-            WHEN pub_hour < 18 THEN '下午'
-            ELSE '晚间' END AS 时段
+    SELECT
+        pub_weekday,                                                 -- 星期几（1=周一 ... 7=周日），后面要用来分组
+        view_cnt,                                                    -- 要统计的指标：播放量
+        CASE WHEN pub_hour < 6  THEN '深夜'                           -- 0~5 点
+             WHEN pub_hour < 12 THEN '上午'                           -- 6~11 点
+             WHEN pub_hour < 18 THEN '下午'                           -- 12~17 点
+             ELSE                     '晚间'                           -- 18~23 点
+        END AS 时段                                                  -- 给分类结果起名，后面靠它分组
     FROM video
-    WHERE is_duration_outlier = 0
-        AND pub_hour >= 6
+    WHERE is_duration_outlier = 0                                    -- 排除 >3 小时的直播回放/课程合集
+      AND pub_hour >= 6                                              -- 直接排掉深夜（只有 10 条，样本不足）
 ),
+
+
+-- 【第 2 层】r：窗口层。一行 = 一条视频（行数不变）。
+-- 这一层只做"加列"：rn（组内排名）、cnt（组内条数）
+-- ⚠️ PARTITION BY 里是两列：只有"星期 + 时段"都相同，才算同一组。
 r AS (
-  SELECT pub_weekday, 时段, view_cnt,
-     ROW_NUMBER() OVER (PARTITION BY pub_weekday, 时段 ORDER BY view_cnt) AS rn,
-     COUNT(*)     OVER (PARTITION BY pub_weekday, 时段)                   AS cnt
-  FROM base
+    SELECT
+        pub_weekday,                                                                 -- 星期
+        时段,                                                                         -- 时段（第 1 层算出来的）
+        view_cnt,                                                                     -- 播放量
+        ROW_NUMBER() OVER (PARTITION BY pub_weekday, 时段 ORDER BY view_cnt) AS rn,    -- 组内按播放升序编号
+        COUNT(*)     OVER (PARTITION BY pub_weekday, 时段)                   AS cnt    -- 组内共几条
+    FROM base
 )
 
-SELECT pub_weekday, 时段, MAX(cnt) AS n,
-       ROUND(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
-                      THEN view_cnt END)) AS 中位数
+
+-- 【第 3 层】最终聚合。一行 = 一个"星期+时段"组合（21 行）。
+SELECT
+    pub_weekday,                                                     -- 维度 1：星期
+    时段,                                                             -- 维度 2：时段
+    MAX(cnt) AS n,                                                    -- 这个格子的样本量
+    ROUND(AVG(CASE WHEN rn IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))     -- 只留正中间那 1~2 行
+                   THEN view_cnt                                      -- 其余行返回 NULL
+              END)) AS 中位数                                          -- AVG 忽略 NULL，等价于取中间值
 FROM r
-GROUP BY pub_weekday, 时段
-ORDER BY 中位数 DESC;  
+GROUP BY pub_weekday, 时段                                             -- 两个维度一起分组
+ORDER BY 中位数 DESC;                                                   -- 按播放中位数从高到低排

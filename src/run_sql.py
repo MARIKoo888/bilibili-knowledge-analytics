@@ -34,12 +34,12 @@ pd.set_option("display.max_rows", 100)
 
 def split_sql(sql: str) -> list[str]:
     """按分号切语句，去掉纯注释块和空语句。"""
-    # 先去掉整行注释，避免注释里的分号干扰
+    # 逐行去掉注释：整行注释丢掉；行尾注释也切掉（避免行尾的 ';' 被注释吞掉）
     lines = []
     for line in sql.splitlines():
-        if line.strip().startswith("--"):
-            continue
-        lines.append(line)
+        code = line.split("--", 1)[0].rstrip()      # 行尾注释一并去掉
+        if code.strip():
+            lines.append(code)
     body = "\n".join(lines)
 
     stmts = []
