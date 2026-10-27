@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS up_author (
 CREATE TABLE IF NOT EXISTS video (
   bvid           VARCHAR(20)  PRIMARY KEY COMMENT 'BV号',
   aid            BIGINT                COMMENT 'av号',
+  cid            BIGINT                COMMENT '弹幕池id(=视频分P的cid),取弹幕必需,第10周补采',
   title          VARCHAR(300)          COMMENT '标题(已去HTML标签/实体)',
   description    TEXT                  COMMENT '简介',
   mid            BIGINT                COMMENT 'UP主ID',
