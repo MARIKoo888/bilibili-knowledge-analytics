@@ -1,0 +1,16 @@
+# Streamlit 主题配置（官方推荐用它替代 CSS 定制外观）
+# 参考：https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+
+[theme]
+base = "light"
+primaryColor = "#2E86DE"          # 与图表主色一致
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7FB"   # 卡片/侧栏底色
+textColor = "#1B2733"
+font = "sans serif"
+
+[server]
+headless = true                    # 不自动开浏览器（需要时手动访问）
+
+[browser]
+gatherUsageStats = false           # 关闭匿名使用统计上报
