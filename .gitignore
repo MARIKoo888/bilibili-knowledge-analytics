@@ -11,6 +11,11 @@ data/processed/*
 *.db
 *.sqlite3
 
+# ✅ 例外：云端看板快照必须入库（由 src/export_snapshot.py 生成）
+#    只含 458 行视频明细 + 几个聚合表，约 200KB；8 万条原始弹幕不入库
+!data/snapshot/
+!data/snapshot/*
+
 # 日志与缓存
 logs/*
 !logs/.gitkeep
